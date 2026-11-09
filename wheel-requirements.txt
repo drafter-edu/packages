@@ -1,0 +1,11 @@
+# All packages here must build/download as pure-Python wheels.
+# Binary scientific dependencies come from the Pyodide distribution.
+appdirs==1.4.4
+sym==0.3.7
+pyneqsys==0.5.7
+pyodesys==0.14.7
+quantities==0.16.4
+dot2tex==2.12.0
+tabulate==0.10.0
+PuLP==3.3.0
+chempy==0.10.2

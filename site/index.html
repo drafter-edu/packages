@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChemPy in Pyodide</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 850px; margin: 3rem auto; padding: 0 1.2rem; line-height: 1.55; }
+    .muted { opacity: .75; }
+    textarea, pre { box-sizing: border-box; width: 100%; padding: 1rem;
+      border-radius: .4rem; border: 1px solid #8886; }
+    textarea { min-height: 185px; font: 14px/1.5 ui-monospace, monospace; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+    button { font: inherit; padding: .55rem 1rem; cursor: pointer; }
+    button:disabled { cursor: wait; opacity: .6; }
+  </style>
+</head>
+<body>
+  <h1>ChemPy in Pyodide</h1>
+  <p class="muted">GitHub Pages hosts Python wheels; Pyodide executes them in your browser.</p>
+  <p id="status" role="status">Initializing Pyodide...</p>
+  <h2>Installation and smoke test</h2>
+  <pre id="log" aria-live="polite">Starting...</pre>
+  <h2>Try Python</h2>
+  <textarea id="code" spellcheck="false" aria-label="Python code">from chempy import balance_stoichiometry
+reactants, products = balance_stoichiometry(
+    {"H2", "O2"}, {"H2O"}
+)
+f"{dict(reactants)} -> {dict(products)}"</textarea>
+  <p><button id="run" disabled>Run Python</button></p>
+  <pre id="result" aria-live="polite">Packages not yet loaded.</pre>
+
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.29.5/full/pyodide.js"></script>
+  <script>
+    const statusElement = document.querySelector('#status');
+    const logElement = document.querySelector('#log');
+    const resultElement = document.querySelector('#result');
+    const runButton = document.querySelector('#run');
+    const sourceElement = document.querySelector('#code');
+    let pyodide;
+
+    function log(message) {
+      logElement.textContent += `\n${message}`;
+    }
+
+    async function main() {
+      try {
+        logElement.textContent = 'Loading Pyodide...';
+        pyodide = await loadPyodide();
+        statusElement.textContent = 'Loading scientific packages...';
+        await pyodide.loadPackage([
+          'micropip', 'numpy', 'scipy', 'sympy', 'matplotlib',
+          'pyparsing', 'mpmath', 'setuptools'
+        ]);
+        log('Loaded Pyodide numerical libraries.');
+
+        statusElement.textContent = 'Installing wheels from this Pages site...';
+        const response = await fetch(new URL('./wheels.json', document.baseURI));
+        if (!response.ok) throw new Error(`Manifest HTTP ${response.status}`);
+        const manifest = await response.json();
+        if (manifest.pyodide_version !== '0.29.5') {
+          throw new Error('Manifest Pyodide version mismatch');
+        }
+        const wheels = manifest.wheels.map(name =>
+          new URL(`./wheels/${name}`, document.baseURI).href
+        );
+        // JSON arrays of strings are valid Python list expressions.
+        await pyodide.runPythonAsync(
+          'import micropip\nawait micropip.install(' + JSON.stringify(wheels) + ', deps=False)'
+        );
+        log(`Installed ${wheels.length} wheels.`);
+
+        statusElement.textContent = 'Running ChemPy smoke tests...';
+        const smokeTest = await pyodide.runPythonAsync(`
+from importlib.metadata import version
+from chempy import Substance, balance_stoichiometry
+
+water = Substance.from_formula('H2O')
+assert water.composition == {1: 2, 8: 1}, water.composition
+reactants, products = balance_stoichiometry({'H2', 'O2'}, {'H2O'})
+assert reactants['H2'] == 2 and reactants['O2'] == 1
+assert products['H2O'] == 2
+f"PASS: ChemPy {version('chempy')} parsed H2O and balanced H2 + O2 -> H2O"
+        `);
+        log(smokeTest);
+        statusElement.textContent = 'ChemPy ready.';
+        resultElement.textContent = 'Ready. Edit the code above and select Run Python.';
+        runButton.disabled = false;
+        runButton.addEventListener('click', async () => {
+          runButton.disabled = true;
+          resultElement.textContent = 'Running...';
+          try {
+            const result = await pyodide.runPythonAsync(sourceElement.value);
+            resultElement.textContent = result === undefined ? '(no return value)' : String(result);
+            if (result && typeof result.destroy === 'function') result.destroy();
+          } catch (error) {
+            resultElement.textContent = String(error);
+          } finally {
+            runButton.disabled = false;
+          }
+        });
+      } catch (error) {
+        statusElement.textContent = 'Setup or smoke test failed.';
+        log(`ERROR: ${error}`);
+        resultElement.textContent = 'See the installation log above.';
+        console.error(error);
+      }
+    }
+    main();
+  </script>
+</body>
+</html>
